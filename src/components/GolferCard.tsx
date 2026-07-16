@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Flag, Scissors } from 'lucide-react';
 import type { Golfer, Score } from '../lib/supabase';
-import { formatScore, getGolferCut, getGolferLatestTotal, getGolferRoundScore, ROUNDS } from '../lib/scoring';
+import { formatScore, getGolferCut, getGolferLatestTotal, getGolferRoundScore, getGolferThru, ROUNDS } from '../lib/scoring';
 
 type Props = {
   golfer: Golfer;
@@ -26,20 +26,30 @@ export default function GolferCard({ golfer, scores }: Props) {
       <div className="flex items-center justify-between">
         <span className="text-xs text-stone-400">{golfer.country}</span>
         {total !== null ? (
-          <span
-            className={`text-xs font-semibold tabular-nums ${
-              cut
-                ? 'text-amber-600'
-                : total < 0
-                ? 'text-emerald-600'
-                : total > 0
-                ? 'text-red-500'
-                : 'text-stone-600'
-            }`}
-          >
-            {cut && <Scissors className="w-3 h-3 inline mr-0.5" />}
-            {formatScore(total)}
-          </span>
+          <div className="flex items-center gap-1">
+            {(() => {
+              const thru = getGolferThru(scores);
+              return thru !== 'F' && thru !== '--' ? (
+                <span className="text-[10px] text-stone-400 tabular-nums">thru {thru}</span>
+              ) : thru === 'F' ? (
+                <span className="text-[10px] text-stone-400">F</span>
+              ) : null;
+            })()}
+            <span
+              className={`text-xs font-semibold tabular-nums ${
+                cut
+                  ? 'text-amber-600'
+                  : total < 0
+                  ? 'text-emerald-600'
+                  : total > 0
+                  ? 'text-red-500'
+                  : 'text-stone-600'
+              }`}
+            >
+              {cut && <Scissors className="w-3 h-3 inline mr-0.5" />}
+              {formatScore(total)}
+            </span>
+          </div>
         ) : (
           <span className="text-xs text-stone-300">—</span>
         )}

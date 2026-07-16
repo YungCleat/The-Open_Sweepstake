@@ -33,6 +33,7 @@ export type Score = {
   score_to_par: number;
   total_to_par: number;
   cut: boolean;
+  thru: string | null;
   updated_at: string;
 };
 

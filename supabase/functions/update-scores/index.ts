@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.57.5";
+import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,6 +59,11 @@ function normalizeName(name: string): string {
     result = result.replaceAll(from, to);
   }
   return result.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function parseScore(val: string): number {
+  const n = parseInt(val);
+  return isNaN(n) ? 0 : n;
 }
 
 Deno.serve(async (req: Request) => {
@@ -144,6 +149,7 @@ Deno.serve(async (req: Request) => {
       score_to_par: number;
       total_to_par: number;
       cut: boolean;
+      thru: string;
       updated_at: string;
     }[] = [];
 
@@ -165,6 +171,9 @@ Deno.serve(async (req: Request) => {
       const sd = player.scoringData;
       const rounds = sd.rounds || [];
       const isCut = sd.position === "CUT";
+      const thru = sd.thru || "F";
+      const totalToPar = parseScore(sd.total);
+      const currentRound = sd.currentRound || 1;
 
       let cumulativeToPar = 0;
 
@@ -188,8 +197,39 @@ Deno.serve(async (req: Request) => {
           score_to_par: roundScoreToPar,
           total_to_par: cumulativeToPar,
           cut: isCut,
+          thru: "F",
           updated_at: new Date().toISOString(),
         });
+      }
+
+      const playerScores = scoresToUpsert.filter((s) => s.golfer_id === golferId);
+
+      if (playerScores.length === 0) {
+        const liveScoreToPar = parseScore(sd.score);
+        scoresToUpsert.push({
+          golfer_id: golferId,
+          round: currentRound,
+          score_to_par: liveScoreToPar,
+          total_to_par: totalToPar,
+          cut: isCut,
+          thru: thru,
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        const lastCompletedRound = Math.max(...playerScores.map((s) => s.round));
+
+        if (currentRound > lastCompletedRound) {
+          const liveScoreToPar = parseScore(sd.score);
+          scoresToUpsert.push({
+            golfer_id: golferId,
+            round: currentRound,
+            score_to_par: liveScoreToPar,
+            total_to_par: totalToPar,
+            cut: isCut,
+            thru: thru,
+            updated_at: new Date().toISOString(),
+          });
+        }
       }
     }
 

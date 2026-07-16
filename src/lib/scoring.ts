@@ -26,6 +26,12 @@ export function getGolferLatestTotal(scores: Score[]): number | null {
   return latest.total_to_par;
 }
 
+export function getGolferThru(scores: Score[]): string {
+  if (scores.length === 0) return '--';
+  const latest = scores.reduce((max, s) => (s.round > max.round ? s : max), scores[0]);
+  return latest.thru || 'F';
+}
+
 export function getMaxRoundPlayed(allScores: Score[]): number {
   if (allScores.length === 0) return 0;
   return Math.max(...allScores.map((s) => s.round));

@@ -65,8 +65,12 @@ export default function Leaderboard({ teams, teamGolfers, golfers, scores }: Pro
         <div className="flex items-center gap-2 text-sm text-stone-500">
           <TrendingUp className="w-4 h-4" />
           <span>
-            Showing scores through Round {maxRound} of 4
+            Showing live scores through Round {maxRound} of 4
             {maxRound >= 2 && ' · cut penalty applied'}
+          </span>
+          <span className="inline-flex items-center gap-1 ml-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs text-emerald-600 font-medium">LIVE</span>
           </span>
         </div>
       )}
