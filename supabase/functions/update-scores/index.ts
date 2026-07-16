@@ -1,21 +1,19 @@
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { createClient } from "npm:@supabase/supabase-js@2.57.5";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client- Info, Apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
 const TOURNAMENT_ID = "R2026100";
 const LEADERBOARD_URL = `https://www.pgatour.com/tournaments/2026/the-open-championship/${TOURNAMENT_ID}/leaderboard`;
+const COURSE_PAR = 70;
 
 type PlayerRow = {
   __typename: string;
   player?: {
     displayName: string;
-    firstName: string;
-    lastName: string;
-    country: string;
   };
   scoringData?: {
     position: string;
@@ -31,8 +29,37 @@ type PlayerRow = {
 type LeaderboardData = {
   players: PlayerRow[];
   tournamentStatus: string;
-  currentRound?: number;
 };
+
+const NAME_ALIASES: Record<string, string> = {
+  "thomas sloman": "Tom Sloman",
+  "sam bairstow": "Samuel Bairstow",
+  "nico echavarria": "Nicolas Echavarria",
+  "jose luis ballester": "Josele Ballester",
+  "liv grinberg": "Lev Grinberg",
+  "dan bradbury": "Daniel Bradbury",
+  "joe dean": "Joseph Dean",
+  "andy sullivan": "Andrew Sullivan",
+  "bard bjoernevikl skogen": "Baard Bjoernevik Skogen",
+};
+
+function normalizeName(name: string): string {
+  const replacements: Record<string, string> = {
+    "ø": "o", "Ø": "o", "å": "a", "Å": "a", "æ": "ae", "Æ": "ae",
+    "é": "e", "É": "e", "è": "e", "È": "e", "ê": "e", "Ê": "e",
+    "ü": "u", "Ü": "u", "ö": "o", "Ö": "o", "ä": "a", "Ä": "a",
+    "ñ": "n", "Ñ": "n", "ç": "c", "Ç": "c", "ß": "ss",
+    "á": "a", "Á": "a", "à": "a", "À": "a", "â": "a", "Â": "a",
+    "í": "i", "Í": "i", "ó": "o", "Ó": "o", "ú": "u", "Ú": "u",
+    "ý": "y", "Ý": "y", "ÿ": "y", "Ÿ": "y",
+    "ï": "i", "Ï": "i", "ë": "e", "Ë": "e",
+  };
+  let result = name;
+  for (const [from, to] of Object.entries(replacements)) {
+    result = result.replaceAll(from, to);
+  }
+  return result.toLowerCase().replace(/[^a-z]/g, "");
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -97,22 +124,28 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Fetch all golfers from database
     const { data: golfers, error: golferError } = await supabase
       .from("golfers")
       .select("id, name");
 
     if (golferError) throw golferError;
 
-    // Build name -> id map (case-insensitive)
     const golferMap = new Map<string, string>();
     for (const g of golfers) {
-      golferMap.set(g.name.toLowerCase(), g.id);
+      golferMap.set(normalizeName(g.name), g.id);
     }
 
     let updatedCount = 0;
     let notFoundCount = 0;
     const notFoundNames: string[] = [];
+    const scoresToUpsert: {
+      golfer_id: string;
+      round: number;
+      score_to_par: number;
+      total_to_par: number;
+      cut: boolean;
+      updated_at: string;
+    }[] = [];
 
     for (const player of leaderboardData.players) {
       if (player.__typename !== "PlayerRowV3" || !player.player || !player.scoringData) {
@@ -120,7 +153,8 @@ Deno.serve(async (req: Request) => {
       }
 
       const name = player.player.displayName;
-      const golferId = golferMap.get(name.toLowerCase());
+      const aliasName = NAME_ALIASES[name.toLowerCase()] || name;
+      const golferId = golferMap.get(normalizeName(aliasName));
 
       if (!golferId) {
         notFoundCount++;
@@ -132,80 +166,42 @@ Deno.serve(async (req: Request) => {
       const rounds = sd.rounds || [];
       const isCut = sd.position === "CUT";
 
-      // Process each round that has a score
+      let cumulativeToPar = 0;
+
       for (let i = 0; i < rounds.length; i++) {
         const roundNum = i + 1;
         const roundScore = rounds[i];
 
         if (roundScore === "-" || roundScore === "") {
-          // No score for this round yet
           continue;
         }
 
-        const totalStrokes = parseInt(roundScore);
-        if (isNaN(totalStrokes)) continue;
+        const strokes = parseInt(roundScore);
+        if (isNaN(strokes)) continue;
 
-        // Calculate score to par for this round (par 71 for Royal Birkdale)
-        // We'll use total_to_par from the API's total field for cumulative
-        // For individual round score, we need to calculate from total
-        // The API gives us the total (cumulative) and individual round scores
+        const roundScoreToPar = strokes - COURSE_PAR;
+        cumulativeToPar += roundScoreToPar;
 
-        // For cut players, they only have 2 rounds
-        // For active players, they have rounds up to currentRound
-        const cumulativeTotal = parseInt(sd.total);
-        const scoreToPar = isNaN(cumulativeTotal) ? 0 : cumulativeTotal;
+        scoresToUpsert.push({
+          golfer_id: golferId,
+          round: roundNum,
+          score_to_par: roundScoreToPar,
+          total_to_par: cumulativeToPar,
+          cut: isCut,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
 
-        // Calculate this round's score to par
-        let roundScoreToPar: number;
-        if (i === 0) {
-          roundScoreToPar = totalStrokes - 71;
-        } else {
-          // Need previous total to calculate this round's delta
-          const prevTotal = parseInt(rounds[i - 1]);
-          if (!isNaN(prevTotal)) {
-            roundScoreToPar = totalStrokes - prevTotal;
-          } else {
-            roundScoreToPar = totalStrokes - 71;
-          }
-        }
+    if (scoresToUpsert.length > 0) {
+      const { error: upsertError } = await supabase
+        .from("scores")
+        .upsert(scoresToUpsert, { onConflict: "golfer_id,round" });
 
-        // For the latest round, use the API's total field
-        // For earlier rounds, calculate cumulative from round scores
-        let cumulativeToPar: number;
-        if (i === rounds.length - 1 || (isCut && i === 1)) {
-          cumulativeToPar = isNaN(cumulativeTotal) ? roundScoreToPar : cumulativeTotal;
-        } else {
-          // Calculate cumulative from individual rounds
-          let totalPar = 0;
-          for (let j = 0; j <= i; j++) {
-            const s = parseInt(rounds[j]);
-            if (!isNaN(s)) {
-              totalPar += s - 71;
-            }
-          }
-          cumulativeToPar = totalPar;
-        }
-
-        // Upsert score
-        const { error: upsertError } = await supabase
-          .from("scores")
-          .upsert(
-            {
-              golfer_id: golferId,
-              round: roundNum,
-              score_to_par: roundScoreToPar,
-              total_to_par: cumulativeToPar,
-              cut: isCut,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "golfer_id,round" }
-          );
-
-        if (upsertError) {
-          console.error(`Error upserting score for ${name} R${roundNum}:`, upsertError);
-        } else {
-          updatedCount++;
-        }
+      if (upsertError) {
+        console.error("Upsert error:", upsertError);
+      } else {
+        updatedCount = scoresToUpsert.length;
       }
     }
 

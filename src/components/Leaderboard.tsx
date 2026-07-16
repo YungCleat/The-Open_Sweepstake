@@ -65,8 +65,8 @@ export default function Leaderboard({ teams, teamGolfers, golfers, scores }: Pro
         <div className="flex items-center gap-2 text-sm text-stone-500">
           <TrendingUp className="w-4 h-4" />
           <span>
-            Showing scores through Round {maxRound}
-            {maxRound >= 2 && ' (cut penalty applied)'}
+            Showing scores through Round {maxRound} of 4
+            {maxRound >= 2 && ' · cut penalty applied'}
           </span>
         </div>
       )}

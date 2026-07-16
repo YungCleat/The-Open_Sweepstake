@@ -31,9 +31,13 @@ export function getMaxRoundPlayed(allScores: Score[]): number {
   return Math.max(...allScores.map((s) => s.round));
 }
 
+export function getCurrentRound(allScores: Score[]): number {
+  return getMaxRoundPlayed(allScores);
+}
+
 export function isCutFinalized(allScores: Score[]): boolean {
-  const round2Scores = allScores.filter((s) => s.round === 2);
-  return round2Scores.length > 0;
+  const maxRound = getMaxRoundPlayed(allScores);
+  return maxRound >= 2;
 }
 
 export function computeTeamScore(
